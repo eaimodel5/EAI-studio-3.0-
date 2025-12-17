@@ -88,7 +88,7 @@ const BootSequence: React.FC<BootSequenceProps> = ({ onComplete }) => {
         </div>
         
         <div className="absolute bottom-8 text-[9px] text-slate-600 tracking-[0.2em] uppercase">
-            EAI Studio 3.0 // Arch v13.0
+            EAI Studio 3.0
         </div>
     </div>
   );
