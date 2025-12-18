@@ -1,16 +1,20 @@
 
 import { GoogleGenAI, Type, Schema, Content } from "@google/genai";
-import { SYSTEM_INSTRUCTION_NL, SYSTEM_INSTRUCTION_EN } from "../constants";
+import { 
+  EAI_SSOT_JSON_NL, 
+  EAI_SSOT_JSON_EN, 
+  SYSTEM_INSTRUCTION_TEMPLATE_NL, 
+  SYSTEM_INSTRUCTION_TEMPLATE_EN 
+} from "../constants";
 import { EAIAnalysis, MechanicalState } from "../types";
 
 let genAI: GoogleGenAI | null = null;
 let currentLanguage: 'nl' | 'en' = 'nl';
 
-// ADAPTIVE COMPUTE MODELS
 const MODEL_PRO = 'gemini-3-pro-preview';
 const MODEL_FLASH = 'gemini-3-flash-preview';
 
-const COMPLEXITY_THRESHOLD = 80; 
+const COMPLEXITY_THRESHOLD = 60; 
 const TEMPERATURE = 0.7;
 
 let chatHistory: Content[] = [];
@@ -27,10 +31,7 @@ export const resetChatSession = () => {
 const responseSchema: Schema = {
   type: Type.OBJECT,
   properties: {
-    conversational_response: {
-      type: Type.STRING,
-      description: "Direct response to the learner, free of any technical jargon.",
-    },
+    conversational_response: { type: Type.STRING },
     analysis: {
       type: Type.OBJECT,
       properties: {
@@ -39,7 +40,7 @@ const responseSchema: Schema = {
         task_densities: { type: Type.ARRAY, items: { type: Type.STRING } },
         secondary_dimensions: { type: Type.ARRAY, items: { type: Type.STRING } },
         active_fix: { type: Type.STRING, nullable: true },
-        reasoning: { type: Type.STRING, description: "Internal pedagogical logic for this turn." },
+        reasoning: { type: Type.STRING },
         current_profile: {
           type: Type.OBJECT,
           properties: {
@@ -49,7 +50,7 @@ const responseSchema: Schema = {
             grade: { type: Type.STRING, nullable: true },
           }
         },
-        task_density_balance: { type: Type.NUMBER, description: "0-100 balance between AI and Learner work." },
+        task_density_balance: { type: Type.NUMBER },
         epistemic_status: { type: Type.STRING },
         cognitive_mode: { type: Type.STRING }
       },
@@ -59,12 +60,29 @@ const responseSchema: Schema = {
   required: ["conversational_response", "analysis"],
 };
 
-const selectModel = (message: string): string => {
-    // Commands always use Pro for better reasoning and instruction following
+// Helper to strip Markdown code blocks if the model adds them (Common GenAI quirk)
+const cleanJsonString = (input: string): string => {
+    let clean = input.trim();
+    // Remove wrapping ```json ... ``` or just ``` ... ```
+    if (clean.startsWith('```')) {
+        clean = clean.replace(/^```(json)?/, '').replace(/```$/, '');
+    }
+    return clean.trim();
+};
+
+// Adaptive Routing 2.0
+const selectModel = (message: string, history: Content[]): string => {
+    // 1. Direct Command override
     if (message.startsWith('/')) return MODEL_PRO;
-    // Short messages use Flash
-    if (message.length < COMPLEXITY_THRESHOLD) return MODEL_FLASH;
-    return MODEL_PRO;
+    
+    // 2. Length check
+    if (message.length > COMPLEXITY_THRESHOLD) return MODEL_PRO;
+
+    // 3. Context check (Deep Logic)
+    // If the conversation is getting long (> 6 turns), use Pro to maintain context window stability and reasoning
+    if (history.length > 6) return MODEL_PRO;
+
+    return MODEL_FLASH;
 };
 
 export const sendMessageToGemini = async (message: string, lang: 'nl' | 'en' = 'nl'): Promise<{ text: string; analysis: EAIAnalysis; mechanical: MechanicalState }> => {
@@ -76,8 +94,17 @@ export const sendMessageToGemini = async (message: string, lang: 'nl' | 'en' = '
       currentLanguage = lang;
   }
 
-  const selectedModelName = selectModel(message);
-  const systemInstruction = lang === 'en' ? SYSTEM_INSTRUCTION_EN : SYSTEM_INSTRUCTION_NL;
+  const selectedModelName = selectModel(message, chatHistory);
+  
+  // CRITICAL: SSOT INJECTION
+  const template = lang === 'en' ? SYSTEM_INSTRUCTION_TEMPLATE_EN : SYSTEM_INSTRUCTION_TEMPLATE_NL;
+  const ssotContent = lang === 'en' ? EAI_SSOT_JSON_EN : EAI_SSOT_JSON_NL;
+  
+  // Replace the placeholder with the actual JSON content
+  const systemInstruction = template.replace(
+      '[[SSOT_INJECTION_POINT]]', 
+      `HIER IS DE WAARHEID (SSOT) JSON. GEBRUIK DIT VOOR ALLE BESLISSINGEN:\n\`\`\`json\n${ssotContent}\n\`\`\``
+  );
 
   try {
     const startTime = Date.now();
@@ -94,16 +121,18 @@ export const sendMessageToGemini = async (message: string, lang: 'nl' | 'en' = '
             responseMimeType: "application/json",
             responseSchema: responseSchema,
             temperature: TEMPERATURE,
-            // Pro model gets a thinking budget to ensure it follows the SSOT directives correctly
+            // Only use thinking budget for Pro model to save tokens/latency on Flash
             thinkingConfig: selectedModelName === MODEL_PRO ? { thinkingBudget: 4000 } : undefined
         }
     });
 
     const endTime = Date.now();
     const responseText = response.text || "{}";
+    const cleanedJson = cleanJsonString(responseText);
 
+    // Update history
     chatHistory.push({ role: 'user', parts: [{ text: message }] });
-    chatHistory.push({ role: 'model', parts: [{ text: responseText }] });
+    chatHistory.push({ role: 'model', parts: [{ text: responseText }] }); // Store original
 
     const usage = response.usageMetadata || { promptTokenCount: 0, candidatesTokenCount: 0 };
     const mechanical: MechanicalState = {
@@ -115,7 +144,29 @@ export const sendMessageToGemini = async (message: string, lang: 'nl' | 'en' = '
         timestamp: new Date()
     };
 
-    const parsed = JSON.parse(responseText);
+    let parsed;
+    try {
+        parsed = JSON.parse(cleanedJson);
+    } catch (e) {
+        console.error("JSON Parse Error on:", cleanedJson);
+        // Robust Fallback safety
+        parsed = { 
+            conversational_response: "Mijn excuses, er ging iets mis in de neurale verwerking. Probeer het nogmaals.", 
+            analysis: { 
+                process_phases: [],
+                coregulation_bands: [],
+                task_densities: [],
+                secondary_dimensions: [],
+                reasoning: "JSON Error - Fallback triggered by Malformed Output", 
+                active_fix: null,
+                task_density_balance: 50,
+                epistemic_status: "ONBEKEND",
+                cognitive_mode: "ONBEKEND",
+                current_profile: {}
+            } 
+        };
+    }
+
     return {
       text: parsed.conversational_response,
       analysis: parsed.analysis,
@@ -123,7 +174,7 @@ export const sendMessageToGemini = async (message: string, lang: 'nl' | 'en' = '
     };
 
   } catch (error) {
-    console.error("Gemini Critical Failure:", error);
+    console.error("Gemini Failure:", error);
     throw error;
   }
 };

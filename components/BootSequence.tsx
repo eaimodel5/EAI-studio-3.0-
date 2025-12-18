@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 
 interface BootSequenceProps {
@@ -58,15 +59,14 @@ const BootSequence: React.FC<BootSequenceProps> = ({ onComplete }) => {
         className="fixed inset-0 z-[9999] bg-[#050914] flex flex-col items-center justify-center font-mono text-cyan-500 transition-opacity duration-1000 ease-in-out select-none cursor-wait"
         style={{ opacity: opacity / 100 }}
     >
-        {/* Animated Core Logo */}
+        {/* Animated Core Logo - Clean Version */}
         <div className="relative w-32 h-32 mb-12">
             <div className="absolute inset-0 border-4 border-cyan-500/20 rounded-full animate-[spin_4s_linear_infinite]"></div>
             <div className="absolute inset-2 border-2 border-t-cyan-400 border-r-transparent border-b-transparent border-l-transparent rounded-full animate-[spin_2s_linear_infinite]"></div>
             <div className="absolute inset-6 border-2 border-b-blue-500 border-l-transparent border-t-transparent border-r-transparent rounded-full animate-[spin_3s_linear_infinite_reverse]"></div>
             
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <div className="absolute inset-0 flex items-center justify-center">
                 <span className="text-2xl font-bold text-white tracking-widest animate-pulse">EAI</span>
-                <span className="text-[10px] font-bold text-cyan-500 tracking-wider font-mono mt-[-2px]">3.0</span>
             </div>
         </div>
 
@@ -87,8 +87,9 @@ const BootSequence: React.FC<BootSequenceProps> = ({ onComplete }) => {
             ))}
         </div>
         
+        {/* Restored EAI STUDIO 3.0 Label */}
         <div className="absolute bottom-8 text-[9px] text-slate-600 tracking-[0.2em] uppercase">
-            EAI Studio 3.0
+            EAI STUDIO 3.0
         </div>
     </div>
   );
